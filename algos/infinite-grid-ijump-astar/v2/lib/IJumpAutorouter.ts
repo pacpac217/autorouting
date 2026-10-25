@@ -33,12 +33,22 @@ export class IJumpAutorouter extends GeneralizedAstarAutorouter {
      * Get the 2-3 next directions (excluding backwards direction), and
      * excluding the forward direction if we just ran into a wall
      */
-    const travelDirs1 = [
+    const baseDirs = [
       { dx: 0, dy: 1 },
       { dx: 1, dy: 0 },
       { dx: 0, dy: -1 },
       { dx: -1, dy: 0 },
     ]
+    const allOrthoCollisions = baseDirs.map((d) =>
+      obstacles.getOrthoDirectionCollisionInfo(node, d, {
+        margin: this.OBSTACLE_MARGIN,
+      }),
+    )
+    const isGoalAligned =
+      (forwardDir.dx !== 0 && Math.abs(node.x - goalPoint.x) < 1e-5) ||
+      (forwardDir.dy !== 0 && Math.abs(node.y - goalPoint.y) < 1e-5)
+
+    const travelDirs1 = baseDirs
       .filter((dir) => {
         // If we have a parent, don't go backwards towards the parent
         if (dir.dx === forwardDir.dx * -1 && dir.dy === forwardDir.dy * -1) {
@@ -48,7 +58,17 @@ export class IJumpAutorouter extends GeneralizedAstarAutorouter {
           dir.dy === forwardDir.dy &&
           node.parent?.obstacleHit
         ) {
-          return false
+          const hasAdjacentOrthoObstacle = allOrthoCollisions.some(
+            (c) =>
+              c.dx * dir.dx === 0 &&
+              c.dy * dir.dy === 0 &&
+              c.obstacle &&
+              isGoalAligned &&
+              c.wallDistance <= this.OBSTACLE_MARGIN + 1e-5,
+          )
+          if (!hasAdjacentOrthoObstacle) {
+            return false
+          }
         }
         return true
       })
@@ -73,12 +93,40 @@ export class IJumpAutorouter extends GeneralizedAstarAutorouter {
     > = []
     for (const travelDir of travelDirs1) {
       let overcomeDistance: number | null = null
-      if (node?.obstacleHit) {
+      const isForwardDir =
+        Boolean(node.parent) &&
+        travelDir.dx === forwardDir.dx &&
+        travelDir.dy === forwardDir.dy
+      const adjacentOrthoCollision = isForwardDir
+        ? allOrthoCollisions.find(
+            (c) =>
+              c.dx * travelDir.dx === 0 &&
+              c.dy * travelDir.dy === 0 &&
+              c.obstacle &&
+              isGoalAligned &&
+              c.wallDistance <= this.OBSTACLE_MARGIN + 1e-5,
+          )
+        : undefined
+      if (node?.obstacleHit && !adjacentOrthoCollision) {
         overcomeDistance = getDistanceToOvercomeObstacle({
           node,
           travelDir,
           wallDir: { ...forwardDir, wallDistance: this.OBSTACLE_MARGIN },
           obstacle: node.obstacleHit,
+          obstacles,
+          OBSTACLE_MARGIN: this.OBSTACLE_MARGIN,
+          SHOULD_DETECT_CONJOINED_OBSTACLES: true,
+        })
+      } else if (adjacentOrthoCollision?.obstacle) {
+        overcomeDistance = getDistanceToOvercomeObstacle({
+          node,
+          travelDir,
+          wallDir: {
+            dx: adjacentOrthoCollision.dx,
+            dy: adjacentOrthoCollision.dy,
+            wallDistance: this.OBSTACLE_MARGIN,
+          },
+          obstacle: adjacentOrthoCollision.obstacle,
           obstacles,
           OBSTACLE_MARGIN: this.OBSTACLE_MARGIN,
           SHOULD_DETECT_CONJOINED_OBSTACLES: true,
